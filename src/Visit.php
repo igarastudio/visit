@@ -134,6 +134,8 @@ class Visit
 
     $env = array_merge(getenv(),
                        ['REQUEST_METHOD' => $method,
+                        'REQUEST_SCHEME' => 'http',
+                        'HTTP_HOST' => 'localhost',
                         'REQUEST_URI' => $path,
                         'QUERY_STRING' => parse_url($path, PHP_URL_QUERY),
                         'SCRIPT_NAME' => basename($script),
