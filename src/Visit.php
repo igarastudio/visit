@@ -91,6 +91,12 @@ class Visit
     return $this;
   }
 
+  public function assertStderrContains(string $expected_str):Visit {
+    assertTrue(str_contains($this->stderr, $expected_str),
+               "$this->method $this->path : String '$expected_str' not found in STDERR\n\n::group::Content:\n$this->stderr\n::endgroup::");
+    return $this;
+  }
+
   public function mock($subject, string $callable):Visit {
     if (empty($this->options['patchwork'])) {
       throw new \Exception("Cannot use mocks, option 'patchwork' (path to Patchwork.php) was not provided");
@@ -195,10 +201,6 @@ class Visit
       if ($this->status_code == 302 && $old_redir_location == $this->redir_location) {
         throw new \Exception("Infinite redirection to $this->redir_location");
       }
-    }
-
-    if (!empty($this->stderr)) {
-      echo("  STDERR: $this->stderr\n");
     }
 
     // Auto-follow 302 redirections
