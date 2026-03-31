@@ -24,6 +24,18 @@ final class VisitTest extends TestCase
               ->assertDontSee('Final');
   }
 
+  public function testPost(): void
+  {
+    visit()->post('/', [])
+           ->assertSee('Post World');
+  }
+
+  public function testDelete(): void
+  {
+    visit()->request('DELETE', '/')
+           ->assertSee('Delete World');
+  }
+
   public function testRedirect(): void
   {
     visit('/redirect')->assertSee('Final');

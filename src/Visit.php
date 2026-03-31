@@ -45,7 +45,7 @@ class Visit
   }
 
   public function get(string $path):Visit {
-    return $this->simulateRequest("GET", $path);
+    return $this->request("GET", $path);
   }
 
   public function post(string $path, array|string $data, string $content_type = 'application/x-www-form-urlencoded'):Visit {
@@ -59,7 +59,7 @@ class Visit
           break;
       }
     }
-    return $this->simulateRequest("POST", $path, $data, $content_type);
+    return $this->request("POST", $path, $data, $content_type);
   }
 
   public function postJson(string $path, array|string $data):Visit {
@@ -115,13 +115,13 @@ class Visit
   // redirected location. When followRedirect=true the redirection is
   // automatic.
   public function followRedirect():Visit {
-    return $this->simulateRequest("GET", $this->redir_location);
+    return $this->request("GET", $this->redir_location);
   }
 
-  private function simulateRequest(string $method,
-                                   string $path,
-                                   ?string $data = null,
-                                   string $content_type = 'application/x-www-form-urlencoded'):Visit {
+  public function request(string $method,
+                          string $path,
+                          ?string $data = null,
+                          string $content_type = 'application/x-www-form-urlencoded'):Visit {
     $this->method = $method;
     $this->path = $path;
 

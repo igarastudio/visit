@@ -5,7 +5,11 @@ $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 switch ($path) {
 
   case '/':
-    echo 'Hello World';
+    switch ($_SERVER['REQUEST_METHOD']) {
+      case 'GET':    echo 'Hello World';  break;
+      case 'POST':   echo 'Post World';   break;
+      case 'DELETE': echo 'Delete World'; break;
+    }
     break;
 
   case '/redirect':
