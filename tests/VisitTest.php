@@ -63,6 +63,26 @@ final class VisitTest extends TestCase
       ->assertSee('Bye World');
   }
 
+  public function testMockingCode(): void
+  {
+    visit('/bye')
+      ->assertSee('Bye World')
+      ->mockCode(<<<PHP
+        class Message {
+          public function __toString() {
+            return "I'm a message from a mocked object!";
+          }
+        }
+      PHP)
+      ->mock('bye_world', 'function() { return new Message(); }')
+      ->get('/bye')
+      ->assertSee("I'm a message from a mocked object!")
+      ->clearMockCodes()
+      ->unmock('bye_world')
+      ->get('/bye')
+      ->assertSee('Bye World');
+  }
+
   public function testPostJson(): void
   {
     visit()->postJson("/json",
