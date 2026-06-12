@@ -19,7 +19,10 @@ class Visit
 {
   public static array $shared_options = [ 'docroot' => './public',
                                           'script' => './public/index.php',
-                                          'followRedirect' => true ];
+                                          'followRedirect' => true,
+                                          // When true enables access to server
+                                          // data, like the $_SESSION superglobal.
+                                          'enableServerData' => false ];
 
   private array $options;
   private string $method;
@@ -31,12 +34,18 @@ class Visit
   private int $status_code = 0;
   private array $cookies = [];
   private array $mocks = [];
+  private array $mockCodes = [];
+  private string $tmpdir;
+  private string $tmpfile = '';
+  private array $data = [];
 
   public function __construct(array $options = []) {
     if (!empty($options))
       $this->options = array_merge(self::$shared_options, $options);
     else
       $this->options = self::$shared_options;
+
+    $this->tmpdir = '_test_output_' . base64_encode(random_bytes(5));
   }
 
   public function setOptions(array $options):Visit {
@@ -97,6 +106,10 @@ class Visit
     return $this;
   }
 
+  public function assertSession(string $key, $expected) {
+    assertEquals($expected, $this->data('_SESSION')[$key] ?? null);
+  }
+
   public function mock($subject, string $callable):Visit {
     if (empty($this->options['patchwork'])) {
       throw new \Exception("Cannot use mocks, option 'patchwork' (path to Patchwork.php) was not provided");
@@ -109,6 +122,25 @@ class Visit
   public function unmock($subject):Visit {
     unset($this->mocks[$subject]);
     return $this;
+  }
+
+  public function mockCode(string $phpCode):Visit {
+    array_push($this->mockCodes, $phpCode);
+    return $this;
+  }
+
+  public function clearMockCodes():Visit {
+    $this->mockCodes = [];
+    return $this;
+  }
+
+  /**
+   * Returns state of data at the server.
+   * Valid keys:
+   * '_SESSION' => returns $_SESSION superglobal
+   */
+  public function data($key) {
+    return $this->data[$key] ?? null;
   }
 
   // Useful when followRedirect=false, so we have a function to go the
@@ -131,8 +163,8 @@ class Visit
     if (!file_exists($script))
       die("File $script doesn't exist to be called with php-cgi\n");
 
-    if (count($this->mocks))
-      $script = $this->generateMockedScript($script);
+    if ($this->mustWrapScript())
+      $script = $this->wrapScript($script);
 
     $old_redir_location = $this->redir_location;
     $this->status_code = 0;
@@ -180,8 +212,8 @@ class Visit
     assertEquals(0, $status,
                  "$this->method $this->path : Procedure to handle request failed with status $status.\nOutput: $this->stdout\nError: $this->stderr");
 
-    if (count($this->mocks))
-      $this->removeMockedScript($script);
+    if ($this->mustWrapScript())
+      $this->removeWrappedScript($script);
 
     [$headers, $this->body] = explode("\r\n\r\n", $this->stdout, 2);
     foreach (explode("\r\n", $headers) as $header) {
@@ -210,21 +242,50 @@ class Visit
     return $this;
   }
 
-  private function generateMockedScript($script):string {
-      $mocksCode = "";
-      foreach ($this->mocks as $subject => $callableStr) {
-        $mocksCode .= "redefine('$subject', $callableStr);" . PHP_EOL;
+  private function mustWrapScript():bool {
+    return !empty($this->mocks) ||
+           !empty($this->mockCodes) ||
+           ($this->options['enableServerData'] ?? false);
+  }
+
+  private function wrapScript($script):string {
+      $code = "";
+
+      if ($this->options['enableServerData'] ?? false) {
+        $this->tmpfile = tempnam($this->tmpdir, 'DATA');
+        $code .= <<<EOD
+          register_shutdown_function(function() {
+            file_put_contents('{$this->tmpfile}',
+                              serialize(['_SESSION' => \$_SESSION]));
+          });
+        EOD.PHP_EOL;
       }
 
-      $pathToPatchwork = $this->options['patchwork'];
-      $mockedScript = pathinfo($script, PATHINFO_DIRNAME) . DIRECTORY_SEPARATOR . "_mocked_" . basename($script);
+      $pathToPatchwork = $this->options['patchwork'] ?? '';
+      $generateMocks = !empty($pathToPatchwork) && !empty($this->mocks);
+      if ($generateMocks) {
+        $code .= <<<EOD
+          require_once "$pathToPatchwork";
+
+          use function Patchwork\{redefine};
+        EOD.PHP_EOL;
+      }
+
+      foreach ($this->mockCodes as $mockCode) {
+        $code .= $mockCode . PHP_EOL;
+      }
+
+      if ($generateMocks) {
+        foreach ($this->mocks as $subject => $callableStr) {
+          $code .= "redefine('$subject', $callableStr);" . PHP_EOL;
+        }
+      }
+
+      $mockedScript = pathinfo($script, PATHINFO_DIRNAME) . DIRECTORY_SEPARATOR . "_wrapped_" . basename($script);
       file_put_contents($mockedScript, <<<EOD
         <?php
-        require_once "$pathToPatchwork";
 
-        use function Patchwork\{redefine};
-
-        $mocksCode
+        $code
 
         include "$script";
         ?>
@@ -233,8 +294,13 @@ class Visit
       return $mockedScript;
   }
 
-  private function removeMockedScript($script) {
+  private function removeWrappedScript($script) {
     unlink($script);
+    if (!empty($this->tmpfile)) {
+      $content = file_get_contents($this->tmpfile);
+      $this->data = unserialize($content);
+      unlink($this->tmpfile);
+    }
   }
 
 }

@@ -14,7 +14,8 @@ use function IgaraStudio\visit;
 
 Visit::$shared_options = [ 'docroot' => __DIR__ . '/public',
                            'script' => __DIR__ . '/public/index.php',
-                           'patchwork' => __DIR__ . '/../vendor/antecedent/patchwork/Patchwork.php'];
+                           'patchwork' => __DIR__ . '/../vendor/antecedent/patchwork/Patchwork.php',
+                           'enableServerData' => false ];
 
 final class VisitTest extends TestCase
 {
@@ -63,6 +64,26 @@ final class VisitTest extends TestCase
       ->assertSee('Bye World');
   }
 
+  public function testMockingCode(): void
+  {
+    visit('/bye')
+      ->assertSee('Bye World')
+      ->mockCode(<<<PHP
+        class Message {
+          public function __toString() {
+            return "I'm a message from a mocked object!";
+          }
+        }
+      PHP)
+      ->mock('bye_world', 'function() { return new Message(); }')
+      ->get('/bye')
+      ->assertSee("I'm a message from a mocked object!")
+      ->clearMockCodes()
+      ->unmock('bye_world')
+      ->get('/bye')
+      ->assertSee('Bye World');
+  }
+
   public function testPostJson(): void
   {
     visit()->postJson("/json",
@@ -74,5 +95,18 @@ final class VisitTest extends TestCase
   {
     visit()->post('/query?v1=abcd&v2=300', ["v3" => "45.6"])
            ->assertSee("v1: abcd; v2: 300; v3: 45.6");
+  }
+
+  public function testSession(): void
+  {
+    // Without enableServerData
+    visit()
+      ->post('/session', ["id" => 1234])
+      ->assertSession('id', null);
+
+    // With enableServerData
+    visit(options: ['enableServerData' => true])
+      ->post('/session', ["id" => 1234])
+      ->assertSession('id', 1234);
   }
 }
