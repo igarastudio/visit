@@ -14,7 +14,8 @@ use function IgaraStudio\visit;
 
 Visit::$shared_options = [ 'docroot' => __DIR__ . '/public',
                            'script' => __DIR__ . '/public/index.php',
-                           'patchwork' => __DIR__ . '/../vendor/antecedent/patchwork/Patchwork.php'];
+                           'patchwork' => __DIR__ . '/../vendor/antecedent/patchwork/Patchwork.php',
+                           'enableServerData' => false ];
 
 final class VisitTest extends TestCase
 {
@@ -94,5 +95,18 @@ final class VisitTest extends TestCase
   {
     visit()->post('/query?v1=abcd&v2=300', ["v3" => "45.6"])
            ->assertSee("v1: abcd; v2: 300; v3: 45.6");
+  }
+
+  public function testSession(): void
+  {
+    // Without enableServerData
+    visit()
+      ->post('/session', ["id" => 1234])
+      ->assertSession('id', null);
+
+    // With enableServerData
+    visit(options: ['enableServerData' => true])
+      ->post('/session', ["id" => 1234])
+      ->assertSession('id', 1234);
   }
 }

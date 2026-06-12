@@ -33,6 +33,10 @@ switch ($path) {
     echo "v1: {$_GET['v1']}; v2: {$_GET['v2']}; v3: {$_POST['v3']}";
     break;
 
+  case '/session':
+    $_SESSION['id'] = $_POST['id'];
+    echo "Id stored in session";
+    break;
   default:
     http_response_code(404);
     break;
