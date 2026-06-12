@@ -19,7 +19,10 @@ class Visit
 {
   public static array $shared_options = [ 'docroot' => './public',
                                           'script' => './public/index.php',
-                                          'followRedirect' => true ];
+                                          'followRedirect' => true,
+                                          // When true enables access to server
+                                          // data, like the $_SESSION superglobal.
+                                          'enableServerData' => false ];
 
   private array $options;
   private string $method;
@@ -104,7 +107,7 @@ class Visit
   }
 
   public function assertSession(string $key, $expected) {
-    assertEquals($expected, $this->data('_SESSION')[$key]);
+    assertEquals($expected, $this->data('_SESSION')[$key] ?? null);
   }
 
   public function mock($subject, string $callable):Visit {
@@ -137,7 +140,7 @@ class Visit
    * '_SESSION' => returns $_SESSION superglobal
    */
   public function data($key) {
-    return $this->data[$key];
+    return $this->data[$key] ?? null;
   }
 
   // Useful when followRedirect=false, so we have a function to go the
@@ -160,8 +163,8 @@ class Visit
     if (!file_exists($script))
       die("File $script doesn't exist to be called with php-cgi\n");
 
-    if (!empty($this->mocks) || !empty($this->mockCodes))
-      $script = $this->generateMockedScript($script);
+    if ($this->mustWrapScript())
+      $script = $this->wrapScript($script);
 
     $old_redir_location = $this->redir_location;
     $this->status_code = 0;
@@ -209,8 +212,8 @@ class Visit
     assertEquals(0, $status,
                  "$this->method $this->path : Procedure to handle request failed with status $status.\nOutput: $this->stdout\nError: $this->stderr");
 
-    if (!empty($this->mocks) || !empty($this->mockCodes))
-      $this->removeMockedScript($script);
+    if ($this->mustWrapScript())
+      $this->removeWrappedScript($script);
 
     [$headers, $this->body] = explode("\r\n\r\n", $this->stdout, 2);
     foreach (explode("\r\n", $headers) as $header) {
@@ -239,37 +242,48 @@ class Visit
     return $this;
   }
 
-  private function generateMockedScript($script):string {
+  private function mustWrapScript():bool {
+    return !empty($this->mocks) ||
+           !empty($this->mockCodes) ||
+           ($this->options['enableServerData'] ?? false);
+  }
+
+  private function wrapScript($script):string {
       $code = "";
+
+      if ($this->options['enableServerData'] ?? false) {
+        $this->tmpfile = tempnam($this->tmpdir, 'DATA');
+        $code .= <<<EOD
+          register_shutdown_function(function() {
+            file_put_contents('{$this->tmpfile}',
+                              serialize(['_SESSION' => \$_SESSION]));
+          });
+        EOD.PHP_EOL;
+      }
+
+      $pathToPatchwork = $this->options['patchwork'] ?? '';
+      $generateMocks = !empty($pathToPatchwork) && !empty($this->mocks);
+      if ($generateMocks) {
+        $code .= <<<EOD
+          require_once "$pathToPatchwork";
+
+          use function Patchwork\{redefine};
+        EOD.PHP_EOL;
+      }
+
       foreach ($this->mockCodes as $mockCode) {
         $code .= $mockCode . PHP_EOL;
       }
 
-      foreach ($this->mocks as $subject => $callableStr) {
-        $code .= "redefine('$subject', $callableStr);" . PHP_EOL;
+      if ($generateMocks) {
+        foreach ($this->mocks as $subject => $callableStr) {
+          $code .= "redefine('$subject', $callableStr);" . PHP_EOL;
+        }
       }
 
-      $includePatchwork = '';
-      $pathToPatchwork = $this->options['patchwork'] ?? '';
-      if (!empty($pathToPatchwork)) {
-        $includePatchwork = <<<EOD
-          require_once "$pathToPatchwork";
-
-          use function Patchwork\{redefine};
-        EOD;
-      }
-
-      $this->tmpfile = tempnam($this->tmpdir, 'DATA');
-      $mockedScript = pathinfo($script, PATHINFO_DIRNAME) . DIRECTORY_SEPARATOR . "_mocked_" . basename($script);
+      $mockedScript = pathinfo($script, PATHINFO_DIRNAME) . DIRECTORY_SEPARATOR . "_wrapped_" . basename($script);
       file_put_contents($mockedScript, <<<EOD
         <?php
-
-        register_shutdown_function(function() {
-          file_put_contents('{$this->tmpfile}',
-                            serialize(['_SESSION' => \$_SESSION]));
-        });
-
-        $includePatchwork
 
         $code
 
@@ -280,7 +294,7 @@ class Visit
       return $mockedScript;
   }
 
-  private function removeMockedScript($script) {
+  private function removeWrappedScript($script) {
     unlink($script);
     if (!empty($this->tmpfile)) {
       $content = file_get_contents($this->tmpfile);
