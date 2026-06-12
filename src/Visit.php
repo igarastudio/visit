@@ -31,6 +31,7 @@ class Visit
   private int $status_code = 0;
   private array $cookies = [];
   private array $mocks = [];
+  private array $mockCodes = [];
 
   public function __construct(array $options = []) {
     if (!empty($options))
@@ -111,6 +112,16 @@ class Visit
     return $this;
   }
 
+  public function mockCode(string $phpCode):Visit {
+    array_push($this->mockCodes, $phpCode);
+    return $this;
+  }
+
+  public function clearMockCodes():Visit {
+    $this->mockCodes = [];
+    return $this;
+  }
+
   // Useful when followRedirect=false, so we have a function to go the
   // redirected location. When followRedirect=true the redirection is
   // automatic.
@@ -131,7 +142,7 @@ class Visit
     if (!file_exists($script))
       die("File $script doesn't exist to be called with php-cgi\n");
 
-    if (count($this->mocks))
+    if (!empty($this->mocks) || !empty($this->mockCodes))
       $script = $this->generateMockedScript($script);
 
     $old_redir_location = $this->redir_location;
@@ -180,7 +191,7 @@ class Visit
     assertEquals(0, $status,
                  "$this->method $this->path : Procedure to handle request failed with status $status.\nOutput: $this->stdout\nError: $this->stderr");
 
-    if (count($this->mocks))
+    if (!empty($this->mocks) || !empty($this->mockCodes))
       $this->removeMockedScript($script);
 
     [$headers, $this->body] = explode("\r\n\r\n", $this->stdout, 2);
@@ -211,20 +222,32 @@ class Visit
   }
 
   private function generateMockedScript($script):string {
-      $mocksCode = "";
-      foreach ($this->mocks as $subject => $callableStr) {
-        $mocksCode .= "redefine('$subject', $callableStr);" . PHP_EOL;
+      $code = "";
+      foreach ($this->mockCodes as $mockCode) {
+        $code .= $mockCode . PHP_EOL;
       }
 
-      $pathToPatchwork = $this->options['patchwork'];
+      foreach ($this->mocks as $subject => $callableStr) {
+        $code .= "redefine('$subject', $callableStr);" . PHP_EOL;
+      }
+
+      $includePatchwork = '';
+      $pathToPatchwork = $this->options['patchwork'] ?? '';
+      if (!empty($pathToPatchwork)) {
+        $includePatchwork = <<<EOD
+          require_once "$pathToPatchwork";
+
+          use function Patchwork\{redefine};
+        EOD;
+      }
       $mockedScript = pathinfo($script, PATHINFO_DIRNAME) . DIRECTORY_SEPARATOR . "_mocked_" . basename($script);
       file_put_contents($mockedScript, <<<EOD
         <?php
         require_once "$pathToPatchwork";
 
-        use function Patchwork\{redefine};
+        $includePatchwork
 
-        $mocksCode
+        $code
 
         include "$script";
         ?>
