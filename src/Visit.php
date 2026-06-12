@@ -32,12 +32,17 @@ class Visit
   private array $cookies = [];
   private array $mocks = [];
   private array $mockCodes = [];
+  private string $tmpdir;
+  private string $tmpfile = '';
+  private array $data = [];
 
   public function __construct(array $options = []) {
     if (!empty($options))
       $this->options = array_merge(self::$shared_options, $options);
     else
       $this->options = self::$shared_options;
+
+    $this->tmpdir = '_test_output_' . base64_encode(random_bytes(5));
   }
 
   public function setOptions(array $options):Visit {
@@ -98,6 +103,10 @@ class Visit
     return $this;
   }
 
+  public function assertSession(string $key, $expected) {
+    assertEquals($expected, $this->data('_SESSION')[$key]);
+  }
+
   public function mock($subject, string $callable):Visit {
     if (empty($this->options['patchwork'])) {
       throw new \Exception("Cannot use mocks, option 'patchwork' (path to Patchwork.php) was not provided");
@@ -120,6 +129,15 @@ class Visit
   public function clearMockCodes():Visit {
     $this->mockCodes = [];
     return $this;
+  }
+
+  /**
+   * Returns state of data at the server.
+   * Valid keys:
+   * '_SESSION' => returns $_SESSION superglobal
+   */
+  public function data($key) {
+    return $this->data[$key];
   }
 
   // Useful when followRedirect=false, so we have a function to go the
@@ -240,10 +258,16 @@ class Visit
           use function Patchwork\{redefine};
         EOD;
       }
+
+      $this->tmpfile = tempnam($this->tmpdir, 'DATA');
       $mockedScript = pathinfo($script, PATHINFO_DIRNAME) . DIRECTORY_SEPARATOR . "_mocked_" . basename($script);
       file_put_contents($mockedScript, <<<EOD
         <?php
-        require_once "$pathToPatchwork";
+
+        register_shutdown_function(function() {
+          file_put_contents('{$this->tmpfile}',
+                            serialize(['_SESSION' => \$_SESSION]));
+        });
 
         $includePatchwork
 
@@ -258,6 +282,11 @@ class Visit
 
   private function removeMockedScript($script) {
     unlink($script);
+    if (!empty($this->tmpfile)) {
+      $content = file_get_contents($this->tmpfile);
+      $this->data = unserialize($content);
+      unlink($this->tmpfile);
+    }
   }
 
 }
